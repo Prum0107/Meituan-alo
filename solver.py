@@ -65,6 +65,86 @@ def solve(input_text: str) -> list:
 
         return chosen, used_couriers, used_tasks
 
+    def base_state(chosen):
+        used_couriers = set()
+        used_tasks = set()
+        for task_list, couriers in chosen.items():
+            used_couriers.update(couriers)
+            used_tasks.update(group_tasks[task_list])
+        return used_couriers, used_tasks
+
+    def fill_uncovered(chosen):
+        used_couriers, used_tasks = base_state(chosen)
+        for task_list, tasks, courier, score, willingness in sorted(
+            candidates,
+            key=lambda c: (
+                c[3] * c[4] + 100.0 * len(c[1]) * (1.0 - c[4]),
+                -len(c[1]),
+                c[3],
+            ),
+        ):
+            if used_tasks == all_tasks:
+                break
+            if courier in used_couriers or task_list in chosen:
+                continue
+            if any(task in used_tasks for task in tasks):
+                continue
+            chosen[task_list] = [courier]
+            used_couriers.add(courier)
+            for task in tasks:
+                used_tasks.add(task)
+        return chosen
+
+    def base_penalty(chosen):
+        covered = set()
+        for task_list in chosen:
+            covered.update(group_tasks[task_list])
+        return penalty(chosen) + 10000.0 * (len(all_tasks) - len(covered))
+
+    def polish_base(chosen):
+        # Try small replacements before adding backup couriers. This can turn two
+        # weak single-order groups into one stronger bundled group and frees a
+        # courier for later probability reinforcement.
+        promising = sorted(
+            candidates,
+            key=lambda c: (
+                c[3] * c[4] + 100.0 * len(c[1]) * (1.0 - c[4]),
+                c[3] - 100.0 * len(c[1]) * c[4],
+            ),
+        )[:120]
+
+        best = dict((k, list(v)) for k, v in chosen.items())
+        best_score = base_penalty(best)
+        for _ in range(1):
+            changed = False
+            used_couriers, _ = base_state(best)
+            for task_list, tasks, courier, score, willingness in promising:
+                conflicts = [
+                    old_task_list
+                    for old_task_list in best
+                    if any(task in group_tasks[old_task_list] for task in tasks)
+                ]
+                if not conflicts:
+                    continue
+                freed = set()
+                for old_task_list in conflicts:
+                    freed.update(best[old_task_list])
+                if courier in used_couriers and courier not in freed:
+                    continue
+
+                trial = dict((k, list(v)) for k, v in best.items() if k not in conflicts)
+                trial[task_list] = [courier]
+                fill_uncovered(trial)
+                trial_score = base_penalty(trial)
+                if trial_score + 1e-9 < best_score:
+                    best = trial
+                    best_score = trial_score
+                    changed = True
+                    break
+            if not changed:
+                break
+        return best
+
     def build_group_base(group_key):
         used_couriers = set()
         used_tasks = set()
@@ -170,6 +250,8 @@ def solve(input_text: str) -> list:
     best_score = None
     for order_key in strategies:
         chosen, used_couriers, used_tasks = build_base(order_key)
+        chosen = polish_base(chosen)
+        used_couriers, used_tasks = base_state(chosen)
         improve(chosen, used_couriers, used_tasks)
         score = penalty(chosen)
         covered = set()
@@ -183,6 +265,8 @@ def solve(input_text: str) -> list:
 
     for group_key in group_strategies:
         chosen, used_couriers, used_tasks = build_group_base(group_key)
+        chosen = polish_base(chosen)
+        used_couriers, used_tasks = base_state(chosen)
         improve(chosen, used_couriers, used_tasks)
         score = penalty(chosen)
         covered = set()
