@@ -25,8 +25,15 @@ def solve(input_text: str) -> list:
 
     all_tasks = set(task_set)
     lookup = {}
+    group_rows = {}
+    group_tasks = {}
     for task_list, tasks, courier, score, willingness in candidates:
         lookup[(task_list, courier)] = (tasks, score, willingness)
+        group_rows.setdefault(task_list, []).append((task_list, tasks, courier, score, willingness))
+        group_tasks[task_list] = tasks
+
+    for task_list in group_rows:
+        group_rows[task_list].sort(key=lambda c: (100.0 * len(c[1]) * (1.0 - c[4]) + c[3] * c[4], c[3]))
 
     def penalty(chosen):
         miss = dict((task, 1.0) for task in all_tasks)
@@ -49,6 +56,40 @@ def solve(input_text: str) -> list:
                 continue
             if any(task in used_tasks for task in tasks):
                 continue
+            chosen[task_list] = [courier]
+            used_couriers.add(courier)
+            for task in tasks:
+                used_tasks.add(task)
+            if used_tasks == all_tasks:
+                break
+
+        return chosen, used_couriers, used_tasks
+
+    def build_group_base(group_key):
+        used_couriers = set()
+        used_tasks = set()
+        chosen = {}
+
+        for task_list in sorted(group_rows, key=group_key):
+            tasks = group_tasks[task_list]
+            if any(task in used_tasks for task in tasks):
+                continue
+
+            best = None
+            best_value = None
+            for row in group_rows[task_list]:
+                _, _, courier, score, willingness = row
+                if courier in used_couriers:
+                    continue
+                value = 100.0 * len(tasks) * (1.0 - willingness) + score * willingness
+                if best_value is None or value < best_value:
+                    best_value = value
+                    best = row
+
+            if best is None:
+                continue
+
+            _, _, courier, score, willingness = best
             chosen[task_list] = [courier]
             used_couriers.add(courier)
             for task in tasks:
@@ -118,6 +159,12 @@ def solve(input_text: str) -> list:
         lambda c: (c[3], -len(c[1]), -c[4]),
         lambda c: (c[3] - 100.0 * len(c[1]) * c[4], c[3]),
     ]
+    group_strategies = [
+        lambda g: (-len(group_tasks[g]), group_rows[g][0][3] * group_rows[g][0][4] + 100.0 * len(group_tasks[g]) * (1.0 - group_rows[g][0][4])),
+        lambda g: (-len(group_tasks[g]), group_rows[g][0][3]),
+        lambda g: (group_rows[g][0][3] * group_rows[g][0][4] + 100.0 * len(group_tasks[g]) * (1.0 - group_rows[g][0][4]), -len(group_tasks[g])),
+        lambda g: (group_rows[g][0][3] - 100.0 * len(group_tasks[g]) * group_rows[g][0][4], group_rows[g][0][3]),
+    ]
 
     best_chosen = None
     best_score = None
@@ -129,6 +176,18 @@ def solve(input_text: str) -> list:
         for task_list in chosen:
             covered.update(lookup[(task_list, chosen[task_list][0])][0])
         # Prefer full coverage strongly, then lower expected penalty.
+        score += 10000.0 * (len(all_tasks) - len(covered))
+        if best_score is None or score < best_score:
+            best_score = score
+            best_chosen = chosen
+
+    for group_key in group_strategies:
+        chosen, used_couriers, used_tasks = build_group_base(group_key)
+        improve(chosen, used_couriers, used_tasks)
+        score = penalty(chosen)
+        covered = set()
+        for task_list in chosen:
+            covered.update(lookup[(task_list, chosen[task_list][0])][0])
         score += 10000.0 * (len(all_tasks) - len(covered))
         if best_score is None or score < best_score:
             best_score = score
