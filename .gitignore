@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+
+# Contest data / generated outputs
+large_seed*.txt
+small_seed*.txt
+solution_out.json
