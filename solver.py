@@ -33,7 +33,31 @@ def solve(input_text: str) -> list:
         group_tasks[task_list] = tasks
 
     for task_list in group_rows:
-        group_rows[task_list].sort(key=lambda c: (100.0 * len(c[1]) * (1.0 - c[4]) + c[3] * c[4], c[3]))
+        group_rows[task_list].sort(
+            key=lambda c: (
+                100.0 * len(c[1]) * (1.0 - c[4]) + c[3] * c[4],
+                c[3],
+            )
+        )
+
+    group_package_score = {}
+    for task_list, rows in group_rows.items():
+        tasks = group_tasks[task_list]
+        miss = 1.0
+        cost = 0.0
+        used = 0
+        for _, _, _, score, willingness in rows[:10]:
+            gain = 100.0 * len(tasks) * miss * willingness - score * willingness
+            if gain <= 0.0:
+                continue
+            cost += score * willingness
+            miss *= 1.0 - willingness
+            used += 1
+        group_package_score[task_list] = (
+            100.0 * len(tasks) * miss + cost,
+            -used,
+            rows[0][3],
+        )
 
     def penalty(chosen):
         miss = dict((task, 1.0) for task in all_tasks)
@@ -108,7 +132,6 @@ def solve(input_text: str) -> list:
                 miss *= 1.0 - willingness
             group_miss[task_list] = miss
 
-        # First repair coverage if a greedy base left any task uncovered.
         changed = True
         while changed:
             changed = False
@@ -132,8 +155,6 @@ def solve(input_text: str) -> list:
                     used_tasks.add(task)
                 changed = True
 
-        # Then add extra couriers to already selected task groups while the
-        # marginal expected-penalty reduction is positive.
         while True:
             best = None
             best_gain = 0.0
@@ -158,12 +179,30 @@ def solve(input_text: str) -> list:
         lambda c: (c[3] * c[4] + 100.0 * len(c[1]) * (1.0 - c[4]), -len(c[1]), c[3]),
         lambda c: (c[3], -len(c[1]), -c[4]),
         lambda c: (c[3] - 100.0 * len(c[1]) * c[4], c[3]),
+        lambda c: (-len(c[1]), -c[4], c[3]),
+        lambda c: (c[3] / max(c[4], 0.05), -len(c[1]), c[3]),
+        lambda c: (-(100.0 * len(c[1]) - c[3]) * c[4], c[3]),
+        lambda c: (100.0 * len(c[1]) * (1.0 - c[4]) + c[3] * c[4], c[3]),
     ]
     group_strategies = [
-        lambda g: (-len(group_tasks[g]), group_rows[g][0][3] * group_rows[g][0][4] + 100.0 * len(group_tasks[g]) * (1.0 - group_rows[g][0][4])),
+        lambda g: (
+            -len(group_tasks[g]),
+            group_rows[g][0][3] * group_rows[g][0][4]
+            + 100.0 * len(group_tasks[g]) * (1.0 - group_rows[g][0][4]),
+        ),
         lambda g: (-len(group_tasks[g]), group_rows[g][0][3]),
-        lambda g: (group_rows[g][0][3] * group_rows[g][0][4] + 100.0 * len(group_tasks[g]) * (1.0 - group_rows[g][0][4]), -len(group_tasks[g])),
-        lambda g: (group_rows[g][0][3] - 100.0 * len(group_tasks[g]) * group_rows[g][0][4], group_rows[g][0][3]),
+        lambda g: (
+            group_rows[g][0][3] * group_rows[g][0][4]
+            + 100.0 * len(group_tasks[g]) * (1.0 - group_rows[g][0][4]),
+            -len(group_tasks[g]),
+        ),
+        lambda g: (
+            group_rows[g][0][3] - 100.0 * len(group_tasks[g]) * group_rows[g][0][4],
+            group_rows[g][0][3],
+        ),
+        lambda g: group_package_score[g],
+        lambda g: (-len(group_tasks[g]), group_package_score[g][0], group_package_score[g][2]),
+        lambda g: (group_package_score[g][0] / len(group_tasks[g]), group_package_score[g][2]),
     ]
 
     best_chosen = None
@@ -175,7 +214,6 @@ def solve(input_text: str) -> list:
         covered = set()
         for task_list in chosen:
             covered.update(lookup[(task_list, chosen[task_list][0])][0])
-        # Prefer full coverage strongly, then lower expected penalty.
         score += 10000.0 * (len(all_tasks) - len(covered))
         if best_score is None or score < best_score:
             best_score = score
